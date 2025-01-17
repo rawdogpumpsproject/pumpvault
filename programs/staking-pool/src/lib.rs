@@ -130,9 +130,6 @@ pub struct Initialize<'info> {
     )]
     pub pool: Account<'info, Pool>, // The staking pool account
 
-    #[account(seeds = [b"pool"], bump)]
-    pub pool_authority: AccountInfo<'info>, // Pool authority PDA
-
     #[account(mut)]
     pub initializer: Signer<'info>, // The user initializing the pool
 
@@ -179,7 +176,10 @@ pub struct Deposit<'info> {
     #[account(mut)]
     pub user: Signer<'info>, // The user making the deposit
 
-    #[account(mut)]
+    #[account(mut,
+        associated_token::mint = pool_token,
+        associated_token::authority = user,
+    )]
     pub user_token_account: Account<'info, TokenAccount>, // User's token account
 
     #[account(mut,
