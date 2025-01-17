@@ -3,11 +3,17 @@
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
+  "resolutions": {
+    "rpc-websockets": "7.11.0"
+  },
   "dependencies": {
-    "@coral-xyz/anchor": "0.29.0",
-    "@solana/web3.js": "1.78.4",
+    "@coral-xyz/anchor": "0.30.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "1.98.0",
     "assert": "*",
-    "bn.js": "*"
+    "bn.js": "*",
+    "dotenv": "^16.4.7",
+    "rpc-websockets": "7.11.0"
   },
   "devDependencies": {
     "@types/bn.js": "^5.1.1",

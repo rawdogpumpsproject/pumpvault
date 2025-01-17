@@ -2,14 +2,14 @@
 seeds = false
 skip-lint = false
 
-[programs.localnet]
-staking_pool = "DLXNCRsxwfowZPfvwJdofp6HHrhXB8eofreVmpjiViv2"
+[programs.devnet]
+staking_pool = "HV1f42YJf82F7QEZequkhkwS1fw1yoNHrMgAqgHreExV"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
