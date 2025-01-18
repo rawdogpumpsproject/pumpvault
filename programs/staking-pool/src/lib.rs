@@ -16,6 +16,7 @@ mod staking_pool {
 
         let pool = &mut ctx.accounts.pool;
         pool.total_staked = 0;
+        pool.total_rewards = initial_amount;
 
         // Transfer the initial tokens from initializer to the pool
         token::transfer(
@@ -61,6 +62,7 @@ mod staking_pool {
         // Update pool's total staked amount
         let pool = &mut ctx.accounts.pool;
         pool.total_staked += amount;
+        pool.total_rewards += (amount as f64 * APY / 100.0) as u64;
 
         Ok(())
     }
@@ -85,12 +87,16 @@ mod staking_pool {
         let total_rewards =
             (user_account.amount_staked as f64 * monthly_rate * months_staked as f64) as u64;
 
+        require!(
+            total_rewards < ctx.accounts.pool.total_rewards,
+            CustomError::InsufficientRewardsInPool
+        );
+
         let max_withdrawable = user_account
             .amount_staked
             .min(user_account.amount_staked * months_staked as u64 / 10)
             + total_rewards;
         require!(max_withdrawable > 0, CustomError::InsufficientWithdrawal);
-
         // Perform token transfer
         let cpi_accounts = Transfer {
             from: ctx.accounts.pool_token_account.to_account_info(),
@@ -233,6 +239,7 @@ pub struct Withdraw<'info> {
 #[account]
 pub struct Pool {
     pub total_staked: u64,
+    pub total_rewards: u64,
 }
 
 #[account]
@@ -253,6 +260,8 @@ pub enum CustomError {
     InsufficientWithdrawal,
     #[msg("Insufficient deposit amount.")]
     InvalidDepositAmount,
+    #[msg("Insufficient reward amount in the pool.")]
+    InsufficientRewardsInPool,
     #[msg("Withdrawals are locked for one month from the last withdrawal.")]
     WithdrawalLocked,
 }
