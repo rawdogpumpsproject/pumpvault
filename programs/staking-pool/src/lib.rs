@@ -70,7 +70,6 @@ mod staking_pool {
         // Update pool's total staked amount
         let pool = &mut ctx.accounts.pool;
         pool.total_staked += amount;
-        pool.total_rewards += (amount as f64 * APY / 100.0) as u64;
 
         Ok(())
     }
@@ -102,10 +101,12 @@ mod staking_pool {
 
         let mut max_withdrawable = (user_account.amount_staked + total_rewards) / 10;
         let mut staked_amount_reduce = user_account.amount_staked / 10;
+        let mut rewards_amount_reduce = total_rewards / 10;
 
         if clock >= user_account.staked_at + YEAR_SECONDS {
             max_withdrawable = user_account.amount_staked + total_rewards;
             staked_amount_reduce = user_account.amount_staked;
+            rewards_amount_reduce = total_rewards;
         }
 
         require!(max_withdrawable > 0, CustomError::InsufficientWithdrawal);
@@ -131,6 +132,7 @@ mod staking_pool {
         // Update balances
         user_account.amount_staked -= staked_amount_reduce;
         ctx.accounts.pool.total_staked -= staked_amount_reduce;
+        ctx.accounts.pool.total_rewards -= rewards_amount_reduce;
 
         // Update last withdrawal timestamp
         user_account.last_withdraw_at = clock;
