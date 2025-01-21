@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked},
+};
 
-declare_id!("HV1f42YJf82F7QEZequkhkwS1fw1yoNHrMgAqgHreExV");
+declare_id!("9jhRF1yctgDgD6LfFcRjidXdkWapDgZ9uYgM5tsayRGd");
 
 #[program]
 mod staking_pool {
@@ -10,25 +13,27 @@ mod staking_pool {
     const APY: f64 = 6.9; // Annual Percentage Yield
     const MONTHLY_RATE: f64 = APY / 12.0; // Monthly reward rate (approx. 0.575%)
     const MONTH_SECONDS: i64 = 30 * 24 * 60 * 60;
+    const YEAR_SECONDS: i64 = 30 * 24 * 60 * 60 * 12;
 
     pub fn initialize(ctx: Context<Initialize>, initial_amount: u64) -> Result<()> {
         require!(initial_amount > 0, CustomError::InvalidDepositAmount);
 
         let pool = &mut ctx.accounts.pool;
-        pool.total_staked = 0;
-        pool.total_rewards = initial_amount;
+        pool.total_rewards += initial_amount;
 
         // Transfer the initial tokens from initializer to the pool
-        token::transfer(
+        transfer_checked(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.initializer_token_account.to_account_info(),
                     to: ctx.accounts.pool_token_account.to_account_info(),
                     authority: ctx.accounts.initializer.to_account_info(),
+                    mint: ctx.accounts.pool_token.to_account_info(),
                 },
             ),
             initial_amount,
+            ctx.accounts.pool_token.decimals,
         )?;
 
         Ok(())
@@ -45,18 +50,21 @@ mod staking_pool {
         }
         user_account.amount_staked += amount;
         user_account.staked_at = Clock::get()?.unix_timestamp;
+        user_account.last_withdraw_at = Clock::get()?.unix_timestamp;
 
         // Perform token transfer from user to pool
-        token::transfer(
+        transfer_checked(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.user_token_account.to_account_info(),
                     to: ctx.accounts.pool_token_account.to_account_info(),
                     authority: ctx.accounts.user.to_account_info(),
+                    mint: ctx.accounts.pool_token.to_account_info(),
                 },
             ),
             amount,
+            ctx.accounts.pool_token.decimals,
         )?;
 
         // Update pool's total staked amount
@@ -92,31 +100,37 @@ mod staking_pool {
             CustomError::InsufficientRewardsInPool
         );
 
-        let max_withdrawable = user_account
-            .amount_staked
-            .min(user_account.amount_staked * months_staked as u64 / 10)
-            + total_rewards;
+        let mut max_withdrawable = (user_account.amount_staked + total_rewards) / 10;
+        let mut staked_amount_reduce = user_account.amount_staked / 10;
+
+        if clock >= user_account.staked_at + YEAR_SECONDS {
+            max_withdrawable = user_account.amount_staked + total_rewards;
+            staked_amount_reduce = user_account.amount_staked;
+        }
+
         require!(max_withdrawable > 0, CustomError::InsufficientWithdrawal);
         // Perform token transfer
-        let cpi_accounts = Transfer {
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.pool_token_account.to_account_info(),
             to: ctx.accounts.user_token_account.to_account_info(),
             authority: ctx.accounts.pool.to_account_info(),
+            mint: ctx.accounts.pool_token.to_account_info(),
         };
         let seeds = &[b"pool".as_ref(), &[ctx.bumps.pool]];
         let signer = &[&seeds[..]];
-        token::transfer(
+        transfer_checked(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 cpi_accounts,
                 signer,
             ),
             max_withdrawable,
+            ctx.accounts.pool_token.decimals,
         )?;
 
         // Update balances
-        user_account.amount_staked -= max_withdrawable;
-        ctx.accounts.pool.total_staked -= max_withdrawable;
+        user_account.amount_staked -= staked_amount_reduce;
+        ctx.accounts.pool.total_staked -= staked_amount_reduce;
 
         // Update last withdrawal timestamp
         user_account.last_withdraw_at = clock;
@@ -128,7 +142,7 @@ mod staking_pool {
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(
-        init,
+        init_if_needed,
         payer = initializer,
         space = 8 + std::mem::size_of::<Pool>(),
         seeds = [b"pool"],
@@ -140,31 +154,34 @@ pub struct Initialize<'info> {
     pub initializer: Signer<'info>, // The user initializing the pool
 
     #[account(mut,
-        associated_token::mint = pool_token,
-        associated_token::authority = initializer,
+        constraint = initializer_token_account.owner == initializer.key(),
+        constraint = initializer_token_account.mint == pool_token.key()
     )]
-    pub initializer_token_account: Account<'info, TokenAccount>, // Initializer's token account
+    pub initializer_token_account: InterfaceAccount<'info, TokenAccount>, // Initializer's token account
 
-    #[account(init,
+    #[account(init_if_needed,
         payer = initializer,
         token::mint = pool_token,
         token::authority = pool,
         seeds = [pool.key().as_ref()],
         bump,
     )]
-    pub pool_token_account: Account<'info, TokenAccount>, // Pool's token account
+    pub pool_token_account: InterfaceAccount<'info, TokenAccount>, // Pool's token account
 
     #[account(mut)]
-    pub pool_token: Account<'info, Mint>,
+    pub pool_token: InterfaceAccount<'info, Mint>,
 
-    pub token_program: Program<'info, Token>, // Token program for CPI
-
+    pub token_program: Interface<'info, TokenInterface>, // Token program for CPI
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>, // System program for account creation
 }
 
 #[derive(Accounts)]
 pub struct Deposit<'info> {
     #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + std::mem::size_of::<Pool>(),
         seeds = [b"pool"],
         bump
     )]
@@ -183,22 +200,25 @@ pub struct Deposit<'info> {
     pub user: Signer<'info>, // The user making the deposit
 
     #[account(mut,
-        associated_token::mint = pool_token,
-        associated_token::authority = user,
+        constraint = user_token_account.owner == user.key(),
+        constraint = user_token_account.mint == pool_token.key()
     )]
-    pub user_token_account: Account<'info, TokenAccount>, // User's token account
+    pub user_token_account: InterfaceAccount<'info, TokenAccount>, // User's token account
 
-    #[account(mut,
-        associated_token::mint = pool_token,
-        associated_token::authority = user,
+    #[account(init_if_needed,
+        payer = user,
+        token::mint = pool_token,
+        token::authority = pool,
+        seeds = [pool.key().as_ref()],
+        bump,
     )]
-    pub pool_token_account: Account<'info, TokenAccount>, // Pool's token account
+    pub pool_token_account: InterfaceAccount<'info, TokenAccount>, // Pool's token account
 
     #[account(mut)]
-    pub pool_token: Account<'info, Mint>,
+    pub pool_token: InterfaceAccount<'info, Mint>,
 
-    pub token_program: Program<'info, Token>, // Token program for CPI
-
+    pub token_program: Interface<'info, TokenInterface>, // Token program for CPI
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>, // Required for account creation
 }
 
@@ -207,33 +227,42 @@ pub struct Withdraw<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
-    #[account(
+    #[account(mut,
         seeds = [b"user_account", user.key().as_ref()],
         bump
     )]
     pub user_account: Account<'info, UserAccount>,
 
     #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + std::mem::size_of::<Pool>(),
         seeds = [b"pool"],
         bump
     )]
-    pub pool: Account<'info, Pool>,
+    pub pool: Account<'info, Pool>, // The staking pool account
 
-    #[account(mut,
-        associated_token::mint = pool_token,
-        associated_token::authority = user,
+    #[account(init_if_needed,
+        payer = user,
+        token::mint = pool_token,
+        token::authority = pool,
+        seeds = [pool.key().as_ref()],
+        bump,
     )]
-    pub pool_token_account: Account<'info, TokenAccount>,
+    pub pool_token_account: InterfaceAccount<'info, TokenAccount>, // Pool's token account
 
     #[account(mut)]
-    pub pool_token: Account<'info, Mint>,
+    pub pool_token: InterfaceAccount<'info, Mint>,
 
     #[account(mut,
-        associated_token::mint = pool_token,
-        associated_token::authority = user,
+        constraint = user_token_account.owner == user.key(),
+        constraint = user_token_account.mint == pool_token.key()
     )]
-    pub user_token_account: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>,
+    pub user_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>, // Required for account creation
 }
 
 #[account]
