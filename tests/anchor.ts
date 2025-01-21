@@ -2,7 +2,7 @@ import * as anchor from "@coral-xyz/anchor";
 import BN from "bn.js";
 import assert, { throws } from "assert";
 import * as web3 from "@solana/web3.js";
-import {ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID} from '@solana/spl-token';
+import {ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID} from '@solana/spl-token';
 import type { StakingPool } from "../target/types/staking_pool";
 import fs from 'fs';
 require('dotenv').config();
@@ -18,7 +18,7 @@ describe("Test", () => {
   const signer = web3.Keypair.fromSecretKey(Uint8Array.from(secretKeyArray));
   const [pool, bump] = web3.PublicKey.findProgramAddressSync([Buffer.from("pool")], program.programId);
   const tokenAddress = "5C9o1ecjwDWaVZkv2hnwusFferXR4G1udVdUfoNMXxwc";
-  const userTokenAccount = getAssociatedTokenAddressSync(new web3.PublicKey(tokenAddress), wallet.publicKey, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const userTokenAccount = getAssociatedTokenAddressSync(new web3.PublicKey(tokenAddress), wallet.publicKey, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
   const [poolTokenAccount, pool_token_account_bump] = web3.PublicKey.findProgramAddressSync([pool.toBuffer()], program.programId);
   const [userAccount, user_account_bump] =  web3.PublicKey.findProgramAddressSync([Buffer.from("user"), signer.publicKey.toBuffer()], program.programId);
   
@@ -82,7 +82,7 @@ describe("Test", () => {
     assert(userAccountData.amountStaked.eq(new BN(1_000_000_000)));
   });
 
-  it("staked_at should be the last time when deposit again", async () => {
+  it("user account's staked_at should be the last time when deposit again", async () => {
     // Send transaction
     const data = new BN(1_000_000_000);
     let txHash = await program.methods
